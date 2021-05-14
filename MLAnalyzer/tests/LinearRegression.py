@@ -9,7 +9,7 @@ b = tf.Variable(0.7)
 learn_rate = 0.01 # 학습률을 설정(0.01 ~ 0.001 사이의 값으로 설정, 학습률이 크면 오버슈팅, 작으면 시간이 오래걸림.)
 
 print(f'step|    w|    b| cost')
-print(f'----|-----|-----|-----')
+print(f'----|-----|-----|-----') 
 
 for i in range(1, 1101): 
     with tf.GradientTape() as tape:

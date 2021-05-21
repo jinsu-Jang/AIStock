@@ -6,6 +6,7 @@ workon stocklab, pyenv
 """
 
 import unittest
+from unittest import result
 from common.agent.ebest import EBest
 import inspect
 import time
@@ -17,6 +18,7 @@ class TestEbest(unittest.TestCase):
     def setUp(self):
         self.ebest = EBest("DEMO")
         self.ebest.login()
+        self.ebest.change_field_lang('E')
         self.mongodb = MongoDBHandler()
         # self.job = Job()
         
@@ -28,21 +30,52 @@ class TestEbest(unittest.TestCase):
     #     self.mongodb.delete_items({}, "stock", "stock_code")
     #     self.mongodb.insert_items(result, "stock", "stock_code")
 
+    def test_get_current_price_by_code(self):
+
+        code_list = list(self.mongodb.find_items({"bu12gubun" : "01"}, "stock1", "stock_code"))
+
+        for item in code_list :
+            result = self.ebest.get_current_price_by_code(item['shcode'])
+            print(result)
+
+            print("++++++++++++++++++++++++++++++++++++++++++++++++++++")
+        print(result)
+
+    # 현재일자 검색과 daily_price 업데이트 최종업데이트 일자
+    # def test_get_last_day(self):        
+    #     fromday = (datetime.today() - timedelta(days=10)).strftime("%Y%m%d")
+    #     today = datetime.today().strftime("%Y%m%d")
+    #     result_sc = self.ebest.get_stock_chart_by_code('035420', "2", fromday, today)  
+    #     # result_sc.sort('date')
+    #     print(result_sc)
+    #     tradingday = ''
+    #     for sc in result_sc:
+    #         if sc['date'] > tradingday:
+    #             tradingday = sc['date']
+    #     print("dddddddddd", tradingday)
+
+    #     cond = {'shcode': '035420', 'date': tradingday}
+    #     results = list(self.mongodb.find_items(cond, 'stock1', "daily_price"))
+
+    #     if len(results) > 0:
+    #         flag_daily_price = True
+
+    #     print("\n results", results)
     # Naver 일별 주식 가져오기 테스트
-    def test_get_daily_price(self):
-        self.ebest.change_field_lang('E')
-        results = self.ebest.get_stock_chart_by_code('035420', "2", '20200101', '20210507')  # naver
-        for result in results:
-            # print(result)
-            result['shcode'] ='035420'
-        self.mongodb.delete_items({}, "stock", "daily_price")
-        self.mongodb.insert_items(results, "stock", "daily_price")
-        results = self.ebest.get_stock_chart_by_code('036570', "2", '20200101', '20210507')  # 엔씨소프트
-        for result in results:
-            # print(result)
-            result['shcode'] ='036570'
-        # print(results)
-        self.mongodb.insert_items(results, "stock", "daily_price")
+    # def test_get_daily_price(self):
+    #     self.ebest.change_field_lang('E')
+    #     results = self.ebest.get_stock_chart_by_code('035420', "2", '20200101', '20210507')  # naver
+    #     for result in results:
+    #         # print(result)
+    #         result['shcode'] ='035420'
+    #     self.mongodb.delete_items({}, "stock", "daily_price")
+    #     self.mongodb.insert_items(results, "stock", "daily_price")
+    #     results = self.ebest.get_stock_chart_by_code('036570', "2", '20200101', '20210507')  # 엔씨소프트
+    #     for result in results:
+    #         # print(result)
+    #         result['shcode'] ='036570'
+    #     # print(results)
+    #     self.mongodb.insert_items(results, "stock", "daily_price")
 
     # def test_getcurrent_price(self):
         # result = self.job.get(4)

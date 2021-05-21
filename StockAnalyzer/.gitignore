@@ -2,6 +2,7 @@
 
 # dependencies
 /pyenv
+/log
 
 # testing
 /coverage

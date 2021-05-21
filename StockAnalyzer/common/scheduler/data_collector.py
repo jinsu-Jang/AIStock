@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta
+from re import S
+import re
 import time
 from common.agent.ebest import EBest
+from common.agent.logger import Logger
 from common.db_handler.mongodb_handler import MongoDBHandler
 # import matplotlib.pyplot as plt
 import pandas as pd
@@ -8,11 +11,15 @@ import pandas as pd
 
 class DataCollector(object):
     def __init__(self):
+        self.starttime = time.time()  # 시작 시간 저장  print("time :", time.time() - start)  # 현재시각 - 시작시간 = 실행 시간
         self.mongodb = MongoDBHandler()
         self.db_name = "stock1"
-        # self.ebest = EBest("DEMO")
-        # self.ebest.login() 
-        # self.ebest.change_field_lang('E')
+        self.log = Logger()
+        self.ebest = EBest("DEMO")
+        self.ebest.login() 
+        self.ebest.change_field_lang('E')
+        self.ins_date = datetime.today().strftime("%Y%m%d")
+        self.ins_time = datetime.today().strftime("%H%M%S")
         
     def __del__(self):
         # self.ebest.logout()
@@ -24,6 +31,101 @@ class DataCollector(object):
         self.mongodb.delete_items({}, self.db_name, "daily_price")
         self.mongodb.delete_items({}, self.db_name, "Naver_news")
 
+    def calc_avg_volume(self, shcode, start_date, end_date):
+        tot_volume = 0
+
+        cond = {'shcode': shcode, 'date': {'$gte': start_date, '$lte':end_date}}
+        price_list = list(self.mongodb.find_items(cond, self.db_name, "daily_price")) 
+
+        if len(price_list):
+            for i, price in enumerate(price_list):
+                if int(price['jdiff_vol']) :
+                    print(price['jdiff_vol'], price['date'])
+                    tot_volume = tot_volume + int(price['jdiff_vol'])
+
+            avg_volume = tot_volume / i
+        
+        print(i, avg_volume, tot_volume)
+        return avg_volume 
+
+
+    def collect_daily_stock_data_from_ebest(self, init=False):
+
+        print( self.calc_avg_volume('035420', '20210501', '20210520'))
+
+        # return
+
+        if init:
+            self.get_stock_code_from_ebest()
+
+        code_list = list(self.mongodb.find_items({"bu12gubun" : "01"}, self.db_name, "stock_code"))
+
+        # 1. update code_info 
+        #    - 주식종목 기본 + 추가 정보(전일거래량, 시가, 종가 등)
+        #    - 거래량이 만주 이하인 종목 제외 
+        result_ext_all = []
+        i = 0
+        if len(code_list) > 0 : 
+            self.log.info("t8407 주식현재가 시작")
+            str_codes = ""
+
+            for code in code_list : 
+                str_codes = str_codes + code["shcode"]
+                i = i + 1
+                if len(str_codes) >= 300 or len(code_list) == i:
+                    result_ext = self.ebest.get_current_price_by_shcodes(str_codes)
+                    result_ext_all.extend(result_ext)  
+                    self.log.info("result_ext_all 건수[%d]" % len(result_ext_all))                              
+                    str_codes = ""
+
+            # 현재일자 검색과 daily_price 업데이트 최종업데이트 일자
+            fromday = (datetime.today() - timedelta(days=30)).strftime("%Y%m%d")
+            today = datetime.today().strftime("%Y%m%d")
+            result_sc = self.ebest.get_stock_chart_by_code('035420', "2", fromday, today)  
+            
+            tradingday = ''                 # 최종거래일
+            befoneday = self.ins_date       # 한달 전일
+            daily_prices = []
+            for sc in result_sc:
+                if sc['date'] > tradingday:
+                    tradingday = sc['date']
+                if sc['date'] < befoneday:
+                    befoneday = sc['date']                    
+
+            self.log.info("트레이딩 일자 : {} 건".format(tradingday))
+
+            cond = {'shcode': '035420', 'date': tradingday}
+            results = list(self.mongodb.find_items(cond, self.db_name, "daily_price")) 
+            if len(results) > 0 :
+                flag_daily_price = False
+            else:
+                flag_daily_price = True
+            
+            # 코드정보와 주식현재가 추가, 일별 주가정보(daily_price) 업데이트
+            for code in code_list :
+                for extend in result_ext_all :
+                    if code["shcode"] == extend["shcode"]:
+                        code.update(extend)
+                        # 한달평균 거래량 계산
+                        ret_avg_volume = self.calc_avg_volume(code["shcode"], befoneday, tradingday)
+                        if flag_daily_price:
+                            daily_price = {'date':tradingday, 'time':"", 'open':extend['open'], 'high':extend['high'], 'low':extend['low'], 
+                                            "close":extend['bidho'], "jdiff_vol":extend['volume'], "value":extend['value'], 
+                                            "shcode": extend['shcode'], "hname":extend['hname'], "insdate":self.ins_date, "instime":self.ins_time}
+                            daily_prices.append(daily_price)
+
+            if flag_daily_price:
+                self.mongodb.delete_items({'date':tradingday}, self.db_name, "daily_price")
+                self.mongodb.insert_items(daily_prices, self.db_name, "daily_price")
+
+            self.log.info("종목코드 + 주식 현재가 반영 : {} 건".format(len(code_list)))
+            
+            self.mongodb.delete_items({}, self.db_name, "code_info")
+            self.mongodb.insert_items(code_list, self.db_name, "code_info")
+
+            self.insert_exec_job_list('EB', '종목코드 + 현재가 반영 작업', 'code_info', str(len(code_list))+" 건이 정상처리 되었습니다.")
+
+        pass
     def get_stock_code_from_ebest(self):
         """
         :주식 종목 코드 가져오기
@@ -46,11 +148,11 @@ class DataCollector(object):
         주식 종목에 현재 가격, 거래량 정보 추가 
         """
         result_cod = self.ebest.get_code_list("ALL")
-        print("get_code_list", len(result_cod))
+        self.log.info("get_code_list%d" % len(result_cod))
         result_ext_all = []
         i = 0
         if len(result_cod) > 0 : 
-            print("t8407 주식현재가 시작")
+            self.log.info("t8407 주식현재가 시작")
             str_codes = ""
             for code in result_cod : 
                 str_codes = str_codes + code["shcode"]
@@ -58,7 +160,7 @@ class DataCollector(object):
                 if len(str_codes) >= 300 or len(result_cod) == i:
                     result_ext = self.ebest.get_current_price_by_shcodes(str_codes)
                     result_ext_all.extend(result_ext)  
-                    print("result_ext_all 건수", len(result_ext_all))                              
+                    self.log.info("result_ext_all 건수[%d]" % len(result_ext_all))                              
                     str_codes = ""
             # 코드정보와 주식현재가 병합
             for code in result_cod :
@@ -66,7 +168,7 @@ class DataCollector(object):
                     if code["shcode"] == extend["shcode"] :
                         code.update(extend)
 
-            print("종목코드 + 주식 현재가 반영 : {} 건".format(len(result_cod)))
+            self.log.info("종목코드 + 주식 현재가 반영 : {} 건".format(len(result_cod)))
             
             self.mongodb.delete_items({}, self.db_name, "code_info")
             self.mongodb.insert_items(result_cod, self.db_name, "code_info")
@@ -79,7 +181,7 @@ class DataCollector(object):
         """    
         # 증권그룹 '01' 
         code_list = list(self.mongodb.find_items({"bu12gubun" : "01"}, self.db_name, "code_info"))
-        print("CODE_LIST", len(code_list))
+        self.log.info("CODE_LIST[%d]" % len(code_list))
 
 
         today = datetime.today().strftime("%Y%m%d")
@@ -169,10 +271,10 @@ class DataCollector(object):
 
 
     def insert_daily_price_from_ebest(self, init=None, start_date=None, shcode=None):
-        """
-        :일일 주식 거래정보(candle chart형) 
-        :init : 1 -> 모든 종목 초기화 후 재생성, 2 -> 입력받은 코드만 조건대로 시작일 부터 갱신
-        """    
+        ####
+        # 일일 주식 거래정보(candle chart형) 
+        # init : 1 -> 모든 종목 초기화 후 재생성, 2 -> 입력받은 코드만 조건대로 시작일 부터 갱신
+        ####  
         today = datetime.today().strftime("%Y%m%d")
         totime = datetime.today().strftime("%H%M%S")
 
@@ -321,7 +423,7 @@ class DataCollector(object):
         cond = {'insdate': today}
         self.mongodb.delete_items(cond, self.db_name, "a2_momentum") 
 
-        # 삼성전자 조회를 통해 모멘텀 계산할 일자 조회
+        # 네이버 조회를 통해 모멘텀 계산할 일자 조회
         price_list = list(self.mongodb.find_items({"shcode" : "035420"}, self.db_name, "daily_price")) 
 
         if not price_list:
@@ -392,8 +494,17 @@ if __name__ == '__main__':
     # dc.search_increase_vol_by_code()
     # dc.insert_daily_price_from_ebest(1, '20190101', '')   # 초기 실행
     # dc.insert_daily_price_from_ebest(2, '20210101', '000020')
-    # dc.insert_daily_price_from_ebest(2, '20210512', '')   # 매일실행
-    # dc.search_bollingerBand_by_code('20210510', 1)
-    dc.search_momentum()
+    # dc.insert_daily_price_from_ebest(2, '20210512', '')   # 매일실행(속도 문제)
+    dc.collect_daily_stock_data_from_ebest(False)
+    # dc.search_bollingerBand_by_code('20210517', 1)   # 날짜는 3일 전으로 셋업
+    # dc.search_momentum()
     # collect_stock_info()
+    # 매일 데이터 축적
+    # 1. 일일 거래 데이터 업데이트
+    # 2. 거래량 증가 종목 찾기
+    # 3. 볼린저 밴드 생성
+    # 4. 모멘텀 데이터 생성
+    # 5. 일일 뉴스 집계
+    # 6. 핵심 단어 추출
+
     print("program main end")

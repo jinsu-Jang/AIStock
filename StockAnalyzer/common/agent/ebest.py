@@ -3,6 +3,7 @@ import win32com.client
 import pythoncom
 from datetime import datetime
 import time
+from common.agent.logger import Logger
 
 class XASession:
     #로그인 상태를 확인하기 위한 클래스변수
@@ -85,6 +86,7 @@ class EBest:
         self.port = config[run_mode]['port']
         self.account = config[run_mode]['account']
         self.field_lang = 'K'
+        self.ebest_log = Logger()
         
 
         self.xa_session_client = win32com.client.DispatchWithEvents("XA_Session.XASession", XASession)
@@ -107,19 +109,24 @@ class EBest:
         """
         self.field_lang = lang   
 
-    def _execute_query(self, res, wait, in_block_name, out_block_name, *out_fields, **set_fields):
+    def _execute_query(self, res, in_block_name, out_block_name, *out_fields, **set_fields):
         """TR코드를 실행하기 위한 메소드입니다.
         :param res:str 리소스명(TR)
+        :param wait : xingapi devcenter 제한참조(10분당 200건 제한일 때 true)
         :param in_block_name:str 인블록명
         :param out_blcok_name:str 아웃블록명
         :param out_params:list 출력필드 리스트
         :param in_params:dict 인블록에 설정할 필드 딕셔너리
         :return result:list 결과를 list에 담아 반환 
         """
-        time.sleep(0.5)
+        res_attr = getattr(TrAttr, res, None)
+        if not res_attr:
+            self.ebest_log.error("EBEST 리소스 정보 클래스 정의 오류. TrAttr")
+
+        time.sleep(1 / res_attr['trancnt']+ 0.001)
         print("current query cnt:", len(self.query_cnt))
 
-        if wait:
+        if res_attr['limit']:
             while len(self.query_cnt) >= EBest.QUERY_LIMIT_10MIN:
                 time.sleep(1)
                 print("waiting for execute query... current query cnt:", len(self.query_cnt))
@@ -227,7 +234,7 @@ class EBest:
             "yesign", "yechange", "yediff", "tmoffer", "tmbid", "ho_status",
             "shcode", "uplmtprice", "dnlmtprice", "open", "high", "low"]
 
-        result = self._execute_query("t1101", False,
+        result = self._execute_query("t1101", 
                                 "t1101InBlock", 
                                 "t1101OutBlock",
                                 *out_params,
@@ -261,7 +268,7 @@ class EBest:
             "ftradmdval","ftradmsval","ftradmdavg","ftradmsavg","info5","spac_gubun","issueprice","alloc_gubun","alloc_text",
             "shterm_text","svi_uplmtprice","svi_dnlmtprice","low_lqdt_gu","abnormal_rise_gu","lend_text","ty_text"]
 
-        result = self._execute_query("t1102", False,
+        result = self._execute_query("t1102", 
                                 "t1102InBlock", 
                                 "t1102OutBlock",
                                 *out_params,
@@ -289,7 +296,7 @@ class EBest:
         #t8413
         #in_params = {"shcode":code, "qrycnt": "1", "gubun":"2", "sdate":start, "cts_date":"", "edate":end, "comp_yn":"N"}    
         #out_params =['date', 'open', 'high', 'low', 'close', 'jdiff_vol', 'sign'] 
-        result = self._execute_query("t1305", True,
+        result = self._execute_query("t1305", 
                                 "t1305InBlock", 
                                 "t1305OutBlock1",
                                 *out_params,
@@ -311,7 +318,7 @@ class EBest:
         market_code = {"ALL":"0", "KOSPI":"1", "KOSDAQ":"2"}
         in_params = {"gubun":market_code[market]}
         out_params =['hname', 'shcode', 'expcode', 'etfgubun', 'memedan', 'gubun', 'bu12gubun','spac_gubun'] 
-        result = self._execute_query("t8436", False,
+        result = self._execute_query("t8436",
                                 "t8436InBlock", 
                                 "t8436OutBlock",
                                 *out_params,
@@ -328,12 +335,10 @@ class EBest:
         if len(shcodes) < 0 or (len(shcodes)%6) != 0:
             raise Exception("Invalid shcodes)")
 
-        print("shcodes cnt " + str(len(shcodes)/6) + "::"+shcodes)
-
         in_params = {"nrec": int(len(shcodes)/6), "shcode" : shcodes}
         out_params =['shcode', 'hname', 'price', 'sign', 'change', 'diff', 'volume', 'offerho', 'bidho', 'cvolume', 'chdegree', 'open',
                     'high', 'low', 'value', 'offerrem', 'bidrem', 'totofferrem', 'totbidrem', 'jnilclose', 'uplmtprice', 'dnlmtprice'] 
-        result = self._execute_query("t8407", False,
+        result = self._execute_query("t8407",
                                 "t8407InBlock", 
                                 "t8407OutBlock1",
                                 *out_params,
@@ -351,7 +356,7 @@ class EBest:
                     "svolume", "jvolume", "price", "change", "gyrate", "jkrate"
                     "shcode"]
 
-        result = self._execute_query("t1921", True,
+        result = self._execute_query("t1921",
                                     "t1921InBlock",
                                     "t1921OutBlock1",
                                     *out_params,
@@ -378,7 +383,7 @@ class EBest:
                     "tjj0006_dan", "tjj0007_dan", "tjj0008_dan", "tjj0009_dan",
                     "tjj0010_dan", "tjj0011_dan", "tjj0018_dan", "tjj0016_dan",
                     "tjj0017_dan" ] 
-        result = self._execute_query("t1717", True,
+        result = self._execute_query("t1717",
                                     "t1717InBlock",
                                     "t1717OutBlock",
                                     *out_params,
@@ -399,7 +404,7 @@ class EBest:
         out_params =["date", "price", "sign", "change", "diff", "volume", "value", 
                     "gm_vo", "gm_va", "gm_per", "gm_avg", "gm_vo_sum"]
 
-        result = self._execute_query("t1927", True,
+        result = self._execute_query("t1927",
                                     "t1927InBlock",
                                     "t1927OutBlock1",
                                     *out_params,
@@ -416,7 +421,7 @@ class EBest:
 
         in_params = {"shcode":code}
         out_params =['tmname', 'tmcode'] 
-        result = self._execute_query("t1532", True,
+        result = self._execute_query("t1532",
                                 "t1532InBlock", 
                                 "t1532OutBlock",
                                 *out_params,
@@ -426,7 +431,7 @@ class EBest:
     def get_theme_list(self):
         in_params = {"dummy":"1"}
         out_params =['tmname', 'tmcode'] 
-        result = self._execute_query("t8425", False,
+        result = self._execute_query("t8425",
                                 "t8425InBlock", 
                                 "t8425OutBlock",
                                 *out_params,
@@ -436,7 +441,7 @@ class EBest:
     def get_category_list(self):
         in_params = {"gubun1":"1"}
         out_params =['hname', 'upcode'] 
-        result = self._execute_query("t8424", True,
+        result = self._execute_query("t8424",
                                 "t8424InBlock", 
                                 "t8424OutBlock",
                                 *out_params,
@@ -451,7 +456,7 @@ class EBest:
                     'volume', 'open', 'high', 'low', 'perx', 
                     'frgsvolume', 'orgsvolume', 'diff_vol', 'total', 
                     'value', 'shcode'] 
-        result = self._execute_query("t1516", True,
+        result = self._execute_query("t1516",
                                     "t1516InBlock",
                                     "t1516OutBlock1",
                                     *out_params,
@@ -464,7 +469,7 @@ class EBest:
         in_params = {"tmcode":tmcode}
         out_params =['hname', 'price', 'sign', 'change', 'diff', 'shcode'
                     'volume', 'open', 'high', 'low', 'value'] 
-        result = self._execute_query("t1537", True,
+        result = self._execute_query("t1537",
                                     "t1537InBlock",
                                     "t1537OutBlock1",
                                     *out_params,
@@ -477,7 +482,7 @@ class EBest:
         in_params = {"shcode":code, "date":date}
         out_params =["recdt", "tableid", "upgu", 
                     "custno", "custnm", "shcode", "upnm" ]
-        result = self._execute_query("t3202", True,
+        result = self._execute_query("t3202",
                                     "t3202InBlock",
                                     "t3202OutBlock",
                                     *out_params,
@@ -489,7 +494,7 @@ class EBest:
                      "QrySrtDt":"20181201", "QryEndDt":"20181205"}
         out_params =["recdt", "tableid", "upgu", 
                     "custno", "custnm", "shcode", "upnm" ]
-        result = self._execute_query("CDPCQ04700", True,
+        result = self._execute_query("CDPCQ04700",
                                     "CDPCQ04700InBlock1",
                                     "CDPCQ04700OutBlock1",
                                     *out_params,
@@ -503,7 +508,7 @@ class EBest:
         in_params = {"RecCnt":"1", "AcntNo": self.account, "Pwd": self.passwd}
         out_params =["MnyOrdAbleAmt", "BalEvalAmt", "DpsastTotamt", 
                     "InvstOrgAmt", "InvstPlAmt", "Dps"]
-        result = self._execute_query("CSPAQ12200", False,
+        result = self._execute_query("CSPAQ12200",
                                     "CSPAQ12200InBlock1",
                                     "CSPAQ12200OutBlock2",
                                     *out_params,
@@ -516,7 +521,7 @@ class EBest:
         """
         in_params = {"RecCnt": "1", "AcntNo": self.account, "Pwd": self.passwd, "BalCreTp": "0", "CmsnAppTpCode": "0", "D2balBaseQryTp": "0", "UprcTpCode": "0"}
         out_params =["IsuNo", "IsuNm", "BnsBaseBalQty", "SellPrc", "BuyPrc", "NowPrc", "AvrUprc", "PnlRat", "BalEvalAmt"]
-        result = self._execute_query("CSPAQ12300", True,
+        result = self._execute_query("CSPAQ12300",
                                     "CSPAQ12300InBlock1",
                                     "CSPAQ12300OutBlock3",
                                     *out_params,
@@ -533,7 +538,7 @@ class EBest:
         in_params = {"accno": self.account, "passwd": self.passwd, "expcode": "", 
                     "chegb":"0", "medosu":"0", "sortgb":"1", "cts_ordno":" "}
         out_params = ["ordno", "expcode", "medosu", "qty", "price", "cheqty", "cheprice", "ordrem", "cfmqty", "status", "orgordno", "ordgb", "ordermtd", "sysprocseq", "hogagb", "price1", "orggb", "singb", "loandt"]
-        result_list = self._execute_query("t0425", False,
+        result_list = self._execute_query("t0425",
                                     "t0425InBlock",
                                     "t0425OutBlock1",
                                     *out_params,
@@ -559,7 +564,7 @@ class EBest:
                      "IsuNm", "BnsTpCode", "BnsTpNm", "OrdPtnCode", "OrdPtnNm", 
                      "MrcTpCode", "OrdQty", "OrdPrc", "ExecQty", "ExecPrc", "LastExecTime", 
                      "OrdprcPtnCode", "OrdprcPtnNm", "AllExecQty", "OrdTime"]
-        result_list = self._execute_query("CSPAQ13700", True,
+        result_list = self._execute_query("CSPAQ13700",
                                     "CSPAQ13700InBlock1",
                                     "CSPAQ13700OutBlock3",
                                     *out_params_3,
@@ -588,7 +593,7 @@ class EBest:
                     "LoanDt":"", "OrdCndiTpCode":"0"}
         out_params = ["OrdNo", "OrdTime", "OrdMktCode", "OrdPtnCode", "ShtnIsuNo", "MgempNo", "OrdAmt", "SpotOrdQty", "IsuNm"]
 
-        result = self._execute_query("CSPAT00600", False,
+        result = self._execute_query("CSPAT00600",
                                     "CSPAT00600InBlock1",
                                     "CSPAT00600OutBlock2",
                                     *out_params,
@@ -605,7 +610,7 @@ class EBest:
         in_params = {"OrgOrdNo":order_no,"AcntNo":self.account, "InptPwd":self.passwd, "IsuNo":code, "OrdQty":qty}
         out_params = ["OrdNo", "PrntOrdNo", "OrdTime", "OrdPtnCode", "ShtnIsuNo", "IsuNm"]
 
-        result = self._execute_query("CSPAT00800", False,
+        result = self._execute_query("CSPAT00800",
                                     "CSPAT00800InBlock1",
                                     "CSPAT00800OutBlock2",
                                     *out_params,
@@ -623,7 +628,7 @@ class EBest:
                 "cts_time":"0000000000", "comp_yn":"N"}
         out_params = ["date", "time", "open", "high", "low", "close", "jdiff_vol", "value"]
 
-        result_list = self._execute_query("t8412", True,
+        result_list = self._execute_query("t8412",
                                     "t8412InBlock",
                                     "t8412OutBlock1",
                                     *out_params,
@@ -647,7 +652,7 @@ class EBest:
                 "sdate":sdate, "edate":edate, "cts_date":"00000000", "cts_time":"0000000000", "cts_daygb":"0"}
         out_params = ["date", "time", "open", "high", "low", "close", "jdiff_vol", "value"]
 
-        result_list = self._execute_query("t4201", True,
+        result_list = self._execute_query("t4201",
                                     "t4201InBlock",
                                     "t4201OutBlock1",
                                     *out_params,
@@ -676,7 +681,7 @@ class EBest:
                       "ordinaryincomegrowth", "liabilitytoequity", "enterpriseratio", 
                       "eps","bps","roe","shcode","per","pbr","peg"]
 
-        result_list = self._execute_query("t3341", True,
+        result_list = self._execute_query("t3341",
                                     "t3341InBlock",
                                     "t3341OutBlock1",
                                     *out_params,
@@ -685,7 +690,79 @@ class EBest:
         for idx, item in enumerate(result_list):
             result[idx] = item
 
-        return result           
+        return result    
+
+class TrAttr :
+    t1101 = {
+        'trancnt' : 5,               # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+    t1102 = {
+        'trancnt' : 5,               # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+    t1305 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t1921 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t8436 = {
+        'trancnt' : 2,               # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+    t8407 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+    t1717 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t1927 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t0425 ={
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+    t8412 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t4201 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t3341 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    CSPAQ12200 = {
+        'trancnt' : 0.2,             # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+    CSPAQ12300 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    CSPAQ13700 = {
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    CSPAT00600 = {
+        'trancnt' : 20,              # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+    CSPAT00800 = {
+        'trancnt' : 20,              # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+
+
 
 class Field:
     t1101 = {
@@ -1010,6 +1087,7 @@ class Field:
             "filler":"filler(미사용)"
         }
     }
+
     t8407 = {
         "t8407OutBlock1":{
             "shcode":"종목코드",
@@ -1035,7 +1113,7 @@ class Field:
             "uplmtprice":"상한가",
             "dnlmtprice":"하한가"
         }
-    }    
+    }
 
     t1717 = {
         "t1717OutBlock":{
@@ -1119,6 +1197,7 @@ class Field:
             "loandt":"대출일자"
         }
     }
+
     t8412 = {
         "t8412OutBlock1":{
             "date":"날짜",
@@ -1134,6 +1213,7 @@ class Field:
             "sign":"종가등락구분"
         }
     }
+
     t4201 = {
         "t4201OutBlock1":{
             "date":"날짜",
@@ -1150,6 +1230,7 @@ class Field:
             "ratevalue":"수정비율반영거래대금"
         }
     }
+
     t3341 = {
         "t3341OutBlock1":{
             "rank":"순위",
@@ -1168,6 +1249,7 @@ class Field:
             "peg":"PEG"
         }
     }
+
     CSPAQ12200 = {
         "CSPAQ12200OutBlock2":{
             "RecCnt":"레코드갯수",
@@ -1388,6 +1470,7 @@ class Field:
             "OdrrId":"주문자ID",
         }
     }
+
     CSPAT00600 = {
         "CSPAT00600OutBlock1":{
             "RecCnt":"레코드갯수",
@@ -1438,6 +1521,7 @@ class Field:
             "IsuNm":"종목명"
         }
     }
+
     CSPAT00800 = {
         "CSPAT00800OutBlock2":{
             "RecCnt":"레코드갯수",

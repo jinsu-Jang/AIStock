@@ -20,44 +20,42 @@ class Logger(object):
         if self.mode is None:
             raise Exception("Need to system mode key")
 
+        # #1 logger instance를 만든다.
         self.logger = logging.getLogger()
-        #1 logger instance를 만든다.
-        self.logger = logging.getLogger()
+        # Check handler exists
+        if not len(self.logger.handlers):
 
-        #2 logger의 level을 가장 낮은 수준인 DEBUG로 설정해둔다.
-        if self.mode == 'dev':
-            self.logger.setLevel(logging.DEBUG)
-        else: self.logger.setLevel(logging.INFO)
+            #2 logger의 level을 가장 낮은 수준인 DEBUG로 설정해둔다.
+            if self.mode == 'dev':
+                self.logger.setLevel(logging.DEBUG)
+            else: self.logger.setLevel(logging.INFO)
 
-        #3 formatter 지정
-        self.formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-        
-        #4 폴더 생성
-        log_path = self.logpath + "%s" %  datetime.today().strftime("%Y%m")
-        if os.path.exists(log_path) is not True:
-            os.mkdir(log_path)
+            #3 formatter 지정
+            self.formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            
+            #4 폴더 생성
+            log_path = self.logpath + "%s" %  datetime.today().strftime("%Y%m")
+            if os.path.exists(log_path) is not True:
+                os.mkdir(log_path)
 
-        #4 handler instance 생성
-        self.console = logging.StreamHandler()
-        file_name = self.logpath + "%s\logging_%s.log" % (datetime.today().strftime("%Y%m"), datetime.today().strftime("%Y%m%d"))
-        self.file_handler = logging.FileHandler(filename=file_name)
-        # file_name = self.logpath + "%s\error_%s.log" % (datetime.today().strftime("%Y%m"), datetime.today().strftime("%Y%m%d"))
-        # self.efile_handler = logging.FileHandler(filename=file_name)
-        
-        #5 handler 별로 다른 level 설정
-        self.console.setLevel(logging.INFO)
-        self.file_handler.setLevel(logging.DEBUG)
-        # self.efile_handler.setLevel(logging.WARNING)
+            #4 handler instance 생성
+            self.console = logging.StreamHandler()
+            file_name = self.logpath + "%s\logging_%s.log" % (datetime.today().strftime("%Y%m"), datetime.today().strftime("%Y%m%d"))
+            self.file_handler = logging.FileHandler(filename=file_name)
 
-        #6 handler 출력 format 지정
-        self.console.setFormatter(self.formatter)
-        self.file_handler.setFormatter(self.formatter)
-        # self.efile_handler.setFormatter(self.formatter)
+            
+            #5 handler 별로 다른 level 설정
+            self.console.setLevel(logging.DEBUG)
+            self.file_handler.setLevel(logging.INFO)
 
-        #7 logger에 handler 추가
-        self.logger.addHandler(self.console)
-        self.logger.addHandler(self.file_handler)
-        # self.logger.addHandler(self.efile_handler)
+            #6 handler 출력 format 지정
+            self.console.setFormatter(self.formatter)
+            self.file_handler.setFormatter(self.formatter)
+
+            #7 logger에 handler 추가
+            self.logger.addHandler(self.console)
+            self.logger.addHandler(self.file_handler)
+
 
     def warning(self, msg):
         self.logger.warning(msg)
@@ -65,16 +63,17 @@ class Logger(object):
     def info(self, msg):
         self.logger.info(msg)
 
+
     def debug(self, msg):
         self.logger.debug(msg)
 
     def error(self, msg):
         self.logger.error(msg)
 
-# if __name__ == '__main__':
-#     log = Logger()
-#     log.warning("warning")
-#     log.error("error~~~")
-#     log.info("info~~~")
-#     log.debug("debug~~~")
+if __name__ == '__main__':
+    log = Logger()
+    log.warning("warning")
+    log.error("error~~~")
+    log.info("info~~~")
+    log.debug("debug~~~")
 

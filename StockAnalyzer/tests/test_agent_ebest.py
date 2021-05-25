@@ -33,13 +33,15 @@ class TestEbest(unittest.TestCase):
     def test_get_current_price_by_code(self):
 
         code_list = list(self.mongodb.find_items({"bu12gubun" : "01"}, "stock1", "stock_code"))
-
-        for item in code_list :
+        start = datetime.now()
+        totCount = len(code_list)
+        for i, item in enumerate( code_list ):
             result = self.ebest.get_current_price_by_code(item['shcode'])
-            print(result)
+            print("처리중[%d] / [%d]" %(i, totCount))
+            if i > 100 : break
 
-            print("++++++++++++++++++++++++++++++++++++++++++++++++++++")
-        print(result)
+ 
+        print("프로그램 종료시간", datetime.now()-start)
 
     # 현재일자 검색과 daily_price 업데이트 최종업데이트 일자
     # def test_get_last_day(self):        

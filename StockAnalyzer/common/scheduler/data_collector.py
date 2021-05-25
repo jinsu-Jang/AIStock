@@ -18,8 +18,13 @@ class DataCollector(object):
         self.ebest = EBest("DEMO")
         self.ebest.login() 
         self.ebest.change_field_lang('E')
-        self.ins_date = datetime.today().strftime("%Y%m%d")
-        self.ins_time = datetime.today().strftime("%H%M%S")
+        self.ins_date = datetime.today().strftime("%Y%m%d")          
+        self.ins_time = datetime.today().strftime("%H%M%S")          
+        self.day_90 = (datetime.today() - timedelta(days=90)).strftime("%Y%m%d")
+        self.day_search_signal = (datetime.today() - timedelta(days=6)).strftime("%Y%m%d")
+        self.tradingday = ''
+        self.befoneday = ''
+        self.df_dates = pd.DataFrame()
         
     def __del__(self):
         # self.ebest.logout()
@@ -40,20 +45,133 @@ class DataCollector(object):
         if len(price_list):
             for i, price in enumerate(price_list):
                 if int(price['jdiff_vol']) :
-                    print(price['jdiff_vol'], price['date'])
                     tot_volume = tot_volume + int(price['jdiff_vol'])
 
-            avg_volume = tot_volume / i
+            if i: avg_volume = tot_volume / i
+            else: avg_volume = 0
         
-        print(i, avg_volume, tot_volume)
         return avg_volume 
 
 
+    def get_processing_date(self):
+        day_30 = (datetime.today() - timedelta(days=30)).strftime("%Y%m%d")
+        cond = cond = {'shcode': '035420', 'date': {'$gte': day_30, '$lte':self.ins_date}}
+        result_sc = list(self.mongodb.find_items(cond, self.db_name, "daily_price"))
+        
+        self.tradingday = ''                 # 최종거래일
+        self.befoneday = self.ins_date       # 한달 전일
+        for sc in result_sc:
+            if sc['date'] > self.tradingday:
+                self.tradingday = sc['date']
+            if sc['date'] < self.befoneday:
+                self.befoneday = sc['date']  
+
+        # 모멘텀을 계산을 위해 주식거래일 추출(1일, 20일, 60일 등)
+        price_list = list(self.mongodb.find_items({"shcode" : "035420"}, self.db_name, "daily_price")) 
+        if not price_list:
+            self.log.error("Not found price Data !! "); return
+
+        df = pd.DataFrame.from_dict(price_list, orient='columns')
+        self.df_dates = df.iloc[[len(df.close)-1, len(df.close)-21, len(df.close)-61, len(df.close)-121, len(df.close)-241], ]    
+
+
+    def calc_bollingerBand_by_code(self, code):                
+        cond = {'shcode': code['shcode'], 'date': {'$gte': self.day_90, '$lte':self.ins_date}}
+        results = list(self.mongodb.find_items(cond, self.db_name, "daily_price"))
+
+        if not len(results) : return
+        # JSON => dataframe으로 변환
+        df = pd.DataFrame.from_dict(results, orient='columns')
+        
+        df['close'] = df['close'].astype(float)
+        df['high'] = df['high'].astype(float)
+        df['low'] = df['low'].astype(float)
+        df['volume'] = df['jdiff_vol'].astype(float)
+
+        df['MA20'] = df['close'].rolling(window=20).mean() 
+        df['stddev'] = df['close'].rolling(window=20).std() 
+        df['upper'] = df['MA20'] + (df['stddev'] * 2)
+        df['lower'] = df['MA20'] - (df['stddev'] * 2)
+        df['PB'] = (df['close'] - df['lower']) / (df['upper'] - df['lower'])
+        # 고가, 저가, 종가의 합을 3으로 나눠서 중심가격 구함.
+        df['TP'] = (df['high'] + df['low'] + df['close']) / 3
+        df['PMF'] = 0
+        df['NMF'] = 0
+        # range함수는 마지막 값을 포함하지 않으므로 0부터 종가개수 -2까지 반복
+        for i in range(len(df.close)-1):
+            if df.TP.values[i] < df.TP.values[i+1]:
+                # 긍정적 현금흐름 : 중심가격이 전날보다 상승한 날들의 현금흐름의 합
+                df.PMF.values[i+1] = df.TP.values[i+1] * df.volume.values[i+1]
+                df.NMF.values[i+1] = 0
+            else:
+                # 긍정적 현금흐름 : 중심가격이 전날보다 하락한 날들의 현금흐름의 합
+                df.NMF.values[i+1] = df.TP.values[i+1] * df.volume.values[i+1]
+                df.PMF.values[i+1] = 0
+        df['MFR'] = (df.PMF.rolling(window=10).sum() /
+            df.NMF.rolling(window=10).sum())
+        df['MFI10'] = 100 - 100 / (1 + df['MFR'])
+        df = df[19:]
+
+        
+        # 상승 하락유무 체크
+        df_up = df.loc[(df.date.values > self.day_search_signal ) & (df.PB.values > 0.8) & (df.MFI10.values > 80), ["date", "PB", "MFI10"]]
+        df_dw = df.loc[(df.date.values > self.day_search_signal ) & (df.PB.values < 0.2) & (df.MFI10.values < 20), ["date", "PB", "MFI10"]]
+
+        ins_bolband = {}
+        if not df_up.empty or not df_dw.empty:
+            signal = 'UP'
+            if not df_dw.empty:
+                signal = 'DW'
+            # 주간, 월간, 3개월 상승율 계산
+            ret_1w = round((df.close.values[len(df.close)-1] / df.close.values[len(df.close)-1-5]  - 1) * 100, 2)   # 1주간 수익율
+            ret_4w = round((df.close.values[len(df.close)-1] / df.close.values[len(df.close)-1-20]  - 1) * 100, 2)  # 20일 한달 수익율
+            ret_8w = round((df.close.values[len(df.close)-1] / df.close.values[len(df.close)-1-40]  - 1) * 100, 2)  # 40일 두달 수익율
+            ret_12w = round((df.close.values[len(df.close)-1] / df.close.values[0]  - 1) * 100, 2)                  # 60일 두달 수익율
+
+            ins_bolband = {"shcode": code["shcode"], "hname":code["hname"], "signal": signal, "search_date": self.day_search_signal, "insdate": self.ins_date, "instime" : self.ins_time,
+                        "ret_1w": ret_1w, "ret_4w": ret_4w, "ret_8w": ret_8w, "ret_12w": ret_12w }
+        
+        return ins_bolband
+
+    def calc_momentum(self, code):
+        if len(self.df_dates) != 5:
+            self.log.error("모멘텀 계산날짜가 잘못 되었습니다. !!df_dates[%d]"%len(self.df_dates)); return {}
+
+        cond = {"shcode" : code['shcode'], 'date': {'$in': self.df_dates.date.values.tolist()}}
+        price_list = list(self.mongodb.find_items(cond, self.db_name, "daily_price")) 
+
+        if len(price_list) != 5:
+            self.log.error("모멘텀 계산 - 데이터 부족 !!df_dates[%s][%d]"%(code['shcode'], len(price_list))); return {}
+
+
+        df = pd.DataFrame.from_dict(price_list, orient='columns')
+        df.date.sort_values()
+        df['close'] = df['close'].astype(float)
+        ret_1mon = round(( df.close.values[4] / df.close.values[3] - 1 ) * 100, 2)
+        ret_3mon = round(( df.close.values[4] / df.close.values[2] - 1 ) * 100, 2)
+        ret_6mon = round(( df.close.values[4] / df.close.values[1] - 1 ) * 100, 2)
+        ret_12mon = round(( df.close.values[4] / df.close.values[0] - 1 ) * 100, 2)
+
+        ins_code = {}
+        if ret_1mon > 0 and ret_3mon > 0:
+            ins_code = {"shcode": code["shcode"], "hname":code["hname"],
+                        "ret_1mon": ret_1mon, "ret_3mon": ret_3mon, "ret_6mon": ret_6mon, "ret_12mon": ret_12mon, "insdate": self.ins_date, "instime" : self.ins_time }
+
+        return ins_code
+            # ins_list.append(ins_code)
+
+        # c += 1
+        # # print('\ncount :{} \nins_list : {}'.format(c, ins_list))
+
+        # if (c % 100) == 0:    # 100건 처리하고 등록
+        #     if ins_list :
+        #         self.mongodb.insert_items(ins_list, self.db_name, "a2_momentum")  
+        #         print(ins_list)
+        #         ins_list.clear()
+
+            # print('\n전체 {} 건 / {} 건 처리 중....'.format(len(code_list), c))
+
     def collect_daily_stock_data_from_ebest(self, init=False):
-
-        print( self.calc_avg_volume('035420', '20210501', '20210520'))
-
-        # return
 
         if init:
             self.get_stock_code_from_ebest()
@@ -64,66 +182,102 @@ class DataCollector(object):
         #    - 주식종목 기본 + 추가 정보(전일거래량, 시가, 종가 등)
         #    - 거래량이 만주 이하인 종목 제외 
         result_ext_all = []
-        i = 0
-        if len(code_list) > 0 : 
-            self.log.info("t8407 주식현재가 시작")
-            str_codes = ""
+        
+        code_cnt = len(code_list)
+        if not code_cnt : self.log.error("데이터 검색을 위한 자료가 없습니다."); return
 
-            for code in code_list : 
-                str_codes = str_codes + code["shcode"]
-                i = i + 1
-                if len(str_codes) >= 300 or len(code_list) == i:
-                    result_ext = self.ebest.get_current_price_by_shcodes(str_codes)
-                    result_ext_all.extend(result_ext)  
-                    self.log.info("result_ext_all 건수[%d]" % len(result_ext_all))                              
-                    str_codes = ""
+        self.log.info("************데이터 분석 시작*********************")
+        
+        i = 0; str_codes = ""
+        for code in code_list : 
+            str_codes = str_codes + code["shcode"]
+            i = i + 1
+            if len(str_codes) >= 300 or len(code_list) == i:
+                result_ext = self.ebest.get_current_price_by_shcodes(str_codes)
+                result_ext_all.extend(result_ext)  
+                self.log.info("result_ext_all 건수[%d]" % len(result_ext_all))                              
+                str_codes = ""
 
-            # 현재일자 검색과 daily_price 업데이트 최종업데이트 일자
-            fromday = (datetime.today() - timedelta(days=30)).strftime("%Y%m%d")
-            today = datetime.today().strftime("%Y%m%d")
-            result_sc = self.ebest.get_stock_chart_by_code('035420', "2", fromday, today)  
-            
-            tradingday = ''                 # 최종거래일
-            befoneday = self.ins_date       # 한달 전일
-            daily_prices = []
-            for sc in result_sc:
-                if sc['date'] > tradingday:
-                    tradingday = sc['date']
-                if sc['date'] < befoneday:
-                    befoneday = sc['date']                    
+        # 데이터 검색을 위한 날짜 초기화
+        self.get_processing_date()
 
-            self.log.info("트레이딩 일자 : {} 건".format(tradingday))
+        
+        daily_prices = []               # 일별 거래정보
+        inc_vol_codes = []              # 거래량 증가 정보
+        inc_bol_bands = []              # 볼린저밴트 종목 검색
+        inc_momentums = []              # 종목 모멘텀 분석
 
-            cond = {'shcode': '035420', 'date': tradingday}
-            results = list(self.mongodb.find_items(cond, self.db_name, "daily_price")) 
-            if len(results) > 0 :
-                flag_daily_price = False
-            else:
-                flag_daily_price = True
-            
-            # 코드정보와 주식현재가 추가, 일별 주가정보(daily_price) 업데이트
-            for code in code_list :
-                for extend in result_ext_all :
-                    if code["shcode"] == extend["shcode"]:
-                        code.update(extend)
-                        # 한달평균 거래량 계산
-                        ret_avg_volume = self.calc_avg_volume(code["shcode"], befoneday, tradingday)
-                        if flag_daily_price:
-                            daily_price = {'date':tradingday, 'time':"", 'open':extend['open'], 'high':extend['high'], 'low':extend['low'], 
-                                            "close":extend['bidho'], "jdiff_vol":extend['volume'], "value":extend['value'], 
-                                            "shcode": extend['shcode'], "hname":extend['hname'], "insdate":self.ins_date, "instime":self.ins_time}
-                            daily_prices.append(daily_price)
+        # cond = {'shcode': '035420', 'date': self.tradingday}
+        # results = list(self.mongodb.find_items(cond, self.db_name, "daily_price")) 
+        # if len(results) > 0 :
+        #     flag_daily_price = False
+        # else:
+        #     flag_daily_price = True
+        
+        # 코드정보와 주식현재가 추가, 일별 주가정보(daily_price) 업데이트
+        for icnt, code in enumerate(code_list) :
+            for extend in result_ext_all :
+                if code["shcode"] == extend["shcode"]:
 
-            if flag_daily_price:
-                self.mongodb.delete_items({'date':tradingday}, self.db_name, "daily_price")
-                self.mongodb.insert_items(daily_prices, self.db_name, "daily_price")
+                    # 거래량 만주 이하인 종목은 계산하지 않음.
+                    if int(extend['volume']) < 10000 : continue
+                    # 한달평균 거래량 계산
+                    avg_volume = self.calc_avg_volume(code["shcode"], self.befoneday, self.tradingday)
+                    ret_avg_volume = {'avg_volume': avg_volume}
+                    code.update(extend)
+                    code.update(ret_avg_volume)
 
-            self.log.info("종목코드 + 주식 현재가 반영 : {} 건".format(len(code_list)))
-            
+                    daily_price = {'date':self.tradingday, 'time':"", 'open':extend['open'], 'high':extend['high'], 'low':extend['low'], 
+                                    "close":extend['bidho'], "jdiff_vol":extend['volume'], "value":extend['value'], 
+                                    "shcode": extend['shcode'], "hname":extend['hname'], "insdate":self.ins_date, "instime":self.ins_time}
+                    daily_prices.append(daily_price)
+
+                    # 거래량 증가 종목 검색
+                    if avg_volume :
+                        inc_rate = int(extend['volume']) / avg_volume
+
+                        if inc_rate > 5 :
+                            inc_code = {"shcode": code["shcode"], "hname":code["hname"], "sdate": self.tradingday, "avg_volume": int(avg_volume),  "volume":int(extend['volume']), "insdate":self.ins_date, "instime":self.ins_time}
+                            inc_vol_codes.append(inc_code)
+
+                    # 볼린저밴드 종목 검색
+                    inc_bol_band = self.calc_bollingerBand_by_code(code)
+                    if inc_bol_band: 
+                        inc_bol_bands.append(inc_bol_band)
+
+                    # 모멘텀 종목 검색
+                    inc_momentum = self.calc_momentum(code)
+                    if inc_momentum :
+                        inc_momentums.append(inc_momentum)
+
+
+            self.log.debug("종목 검색 중..[%s][%s][%d] / [%d]"% (code["shcode"], code["hname"], icnt, code_cnt))
+
+        if daily_prices :
+            self.mongodb.delete_items({'date':self.tradingday}, self.db_name, "daily_price")
+            self.mongodb.insert_items(daily_prices, self.db_name, "daily_price")
+            self.log.debug("daily_prices 등록.[%d]"% (len(daily_prices)))
+
+        if inc_bol_bands :
+            self.mongodb.delete_items({'insdate':self.ins_date}, self.db_name, "a1_bollband")
+            self.mongodb.insert_items(inc_bol_bands, self.db_name, "a1_bollband")
+            self.log.debug("inc_bol_bands 등록.[%d]"% (len(inc_bol_bands)))
+
+        if inc_momentums :
+            self.mongodb.delete_items({'insdate':self.ins_date}, self.db_name, "a2_momentum")
+            self.mongodb.insert_items(inc_momentums, self.db_name, "a2_momentum")            
+            self.log.debug("inc_momentums 등록.[%d]"% (len(inc_momentums)))
+
+        if inc_vol_codes :
+            self.mongodb.delete_items({'date':self.tradingday}, self.db_name, "a3_inc_volume")
+            self.mongodb.insert_items(inc_vol_codes, self.db_name, "a3_inc_volume")
+            self.log.debug("inc_vol_codes 등록.[%d]"% (len(inc_vol_codes)))
+
+        if code_list:       
             self.mongodb.delete_items({}, self.db_name, "code_info")
             self.mongodb.insert_items(code_list, self.db_name, "code_info")
 
-            self.insert_exec_job_list('EB', '종목코드 + 현재가 반영 작업', 'code_info', str(len(code_list))+" 건이 정상처리 되었습니다.")
+        self.insert_exec_job_list('EB', '종목코드 + 현재가 반영 작업', 'code_info', str(len(code_list))+" 건이 정상처리 되었습니다.")
 
         pass
     def get_stock_code_from_ebest(self):
@@ -495,7 +649,11 @@ if __name__ == '__main__':
     # dc.insert_daily_price_from_ebest(1, '20190101', '')   # 초기 실행
     # dc.insert_daily_price_from_ebest(2, '20210101', '000020')
     # dc.insert_daily_price_from_ebest(2, '20210512', '')   # 매일실행(속도 문제)
+    program_start = datetime.now()
+    dc.log.info("프로그램 시작시간 [%s]"% str(program_start))
+
     dc.collect_daily_stock_data_from_ebest(False)
+
     # dc.search_bollingerBand_by_code('20210517', 1)   # 날짜는 3일 전으로 셋업
     # dc.search_momentum()
     # collect_stock_info()
@@ -507,4 +665,4 @@ if __name__ == '__main__':
     # 5. 일일 뉴스 집계
     # 6. 핵심 단어 추출
 
-    print("program main end")
+    dc.log.info("프로그램 종료시간 [%s] 수행시간[%s]"% (datetime.now(), datetime.now()- program_start))

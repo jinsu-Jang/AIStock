@@ -87,7 +87,7 @@ class KeywordAnalyzer(object):
                     faverCode.append(strCode)
 
         if len(faverCode) == 1:
-            faverCodeScore.extend({faverCode, score})
+            faverCodeScore.extend({faverCode: score})
         else: 
             print("faver Code", faverCode, score)
             

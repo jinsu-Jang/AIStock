@@ -87,6 +87,7 @@ class EBest:
         self.account = config[run_mode]['account']
         self.field_lang = 'K'
         self.ebest_log = Logger()
+        self.current_res = ""
         
 
         self.xa_session_client = win32com.client.DispatchWithEvents("XA_Session.XASession", XASession)
@@ -123,8 +124,9 @@ class EBest:
         if not res_attr:
             self.ebest_log.error("EBEST 리소스 정보 클래스 정의 오류. TrAttr")
 
+        # 초당 전송 수에 따라 대기
         time.sleep(1 / res_attr['trancnt']+ 0.001)
-        print("current query cnt:", len(self.query_cnt))
+        # print("current query cnt:", len(self.query_cnt), self.query_cnt)
 
         if res_attr['limit']:
             while len(self.query_cnt) >= EBest.QUERY_LIMIT_10MIN:
@@ -415,37 +417,90 @@ class EBest:
 
         return result
 
-    def get_theme_by_code(self, code):
-        if code is None:
-            raise Exception("Need to code param")
+    def get_theme_by_tmcode(self, tmname=None, tmcode=None):
+        """TR: t1531 섹터별 종목
+        :param tmcode:str 종목코드
+        :return result:list 
+        """
+        if tmcode is None:
+            in_params = {}
+        else: in_params = {"tmname": tmname, "tmcode" : tmcode}
+        
 
-        in_params = {"shcode":code}
-        out_params =['tmname', 'tmcode'] 
-        result = self._execute_query("t1532",
-                                "t1532InBlock", 
-                                "t1532OutBlock",
-                                *out_params,
-                                **in_params)
+        out_params =['tmname', 'avgdiff', 'tmcode'] 
+        result = self._execute_query("t1531", "t1531InBlock", "t1531OutBlock", *out_params, **in_params)
         return result
 
-    def get_theme_list(self):
-        in_params = {"dummy":"1"}
+    def get_theme_by_shcode(self, shcode):
+        """TR: t1532 종목별테마
+        :param code:str 종목코드
+        :return result:list 
+        """
+        if shcode is None:
+            raise Exception("Need to code param")
+
+        in_params = {"shcode":shcode}
+        out_params =['tmname', 'avgdiff', 'tmcode'] 
+        result = self._execute_query("t1532", "t1532InBlock", "t1532OutBlock", *out_params, **in_params)
+        return result
+
+    def find_special_theme(self, gubun, chgdate):
+        """TR: t1533 종목별테마
+        :param gubun :str 구분, (1:상승율 상위, 2:하락율 상위, 3:거래증가율 상위, 4:거래증가율 하위, 5:상승종목비율 상위, 상승종목비율 하위)
+        :param chgdate:str 대비일자
+        :return result:list 
+        """
+        in_params = {"gubun":gubun, "chgdate":chgdate}
+        out_params = ["tmname", "totcnt", "upcnt", "dncnt", "uprate", "diff_vol", "avgdiff", "chgdiff", "tmcode"] 
+        result = self._execute_query("t1533", "t1533InBlock", "t1533OutBlock1", *out_params, **in_params)
+
+        return result        
+
+    def get_price_by_category(self, upcode, gubun, shcode):
+        """TR: t1516 업종별 종목시세
+        :param upcode:str 업종코드
+        :param gubun: 1-> 코스피업종, 2->코스닥업종, 3->섹터지수
+        :return result:list 
+        """
+        if shcode is None:
+            raise Exception("Need to code param")
+
+        in_params = {"upcode":upcode, "gubun": gubun, "shcode":shcode}
         out_params =['tmname', 'tmcode'] 
-        result = self._execute_query("t8425",
-                                "t8425InBlock", 
-                                "t8425OutBlock",
-                                *out_params,
-                                **in_params)
+        result = self._execute_query("t1516", "t1516InBlock", "t1516OutBlock1", *out_params, **in_params)
+        return result    
+
+    def get_price_by_theme(self, tmcode=None):
+        """TR: t1537 테마별 종목시세
+        :param code:str 종목코드
+        :return result:list 
+        """
+        if tmcode is None:
+            raise Exception("Need to code param")
+
+        in_params = {"tmcode":tmcode}
+        out_params =["hname","price","sign","change","diff","volume","jniltime","shcode","yeprice","open","high","low","value","marketcap"] 
+        result = self._execute_query("t1537", "t1537InBlock", "t1537OutBlock1", *out_params,**in_params)
+        return result             
+
+    def get_theme_list(self):
+        """TR: t8425 테마 전체조회
+        :param code:str 종목코드
+        :return result:list 
+        """        
+        in_params = {"dummy":"1"} 
+        out_params =['tmname', 'tmcode'] 
+        result = self._execute_query("t8425", "t8425InBlock", "t8425OutBlock", *out_params, **in_params)
         return result
 
     def get_category_list(self):
+        """TR: t8424 업종 전체조회
+        :param code:str 종목코드
+        :return result:list 
+        """ 
         in_params = {"gubun1":"1"}
         out_params =['hname', 'upcode'] 
-        result = self._execute_query("t8424",
-                                "t8424InBlock", 
-                                "t8424OutBlock",
-                                *out_params,
-                                **in_params)
+        result = self._execute_query("t8424", "t8424InBlock", "t8424OutBlock", *out_params, **in_params)
         return result
     
     def get_price_by_category(self, upcode=None):
@@ -463,18 +518,18 @@ class EBest:
                                     **in_params)
         return result
 
-    def get_price_by_theme(self, tmcode=None):
-        if tmcode is None:
-            raise Exception("Need to tmcode")
-        in_params = {"tmcode":tmcode}
-        out_params =['hname', 'price', 'sign', 'change', 'diff', 'shcode'
-                    'volume', 'open', 'high', 'low', 'value'] 
-        result = self._execute_query("t1537",
-                                    "t1537InBlock",
-                                    "t1537OutBlock1",
-                                    *out_params,
-                                    **in_params)
-        return result
+    # def get_price_by_theme(self, tmcode=None):
+    #     if tmcode is None:
+    #         raise Exception("Need to tmcode")
+    #     in_params = {"tmcode":tmcode}
+    #     out_params =['hname', 'price', 'sign', 'change', 'diff', 'shcode'
+    #                 'volume', 'open', 'high', 'low', 'value'] 
+    #     result = self._execute_query("t1537",
+    #                                 "t1537InBlock",
+    #                                 "t1537OutBlock1",
+    #                                 *out_params,
+    #                                 **in_params)
+    #     return result
 
     def get_event_by_code(self, code=None, date=None):
         if code is None:
@@ -693,39 +748,67 @@ class EBest:
         return result    
 
 class TrAttr :
-    t1101 = {
+    t0425 ={                         # 주식 채결/미체결
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+    t1101 = {                        # 주식현재호가조회
         'trancnt' : 5,               # 초당 전송 수
         'limit' : False              # 기간 별 제한
     }
-    t1102 = {
+    t1102 = {                        # 주식현재가(시세)조회
         'trancnt' : 5,               # 초당 전송 수
         'limit' : False              # 기간 별 제한
     }
-    t1305 = {
+    t1305 = {                        # 기간별 주가
         'trancnt' : 1,               # 초당 전송 수
         'limit' : True               # 기간 별 제한
     }
-    t1921 = {
+    t1516 = {                        # 업종별 시세
         'trancnt' : 1,               # 초당 전송 수
         'limit' : True               # 기간 별 제한
     }
-    t8436 = {
-        'trancnt' : 2,               # 초당 전송 수
-        'limit' : False              # 기간 별 제한
-    }
-    t8407 = {
+    t1531 = {                        # 섹터별 종목
         'trancnt' : 1,               # 초당 전송 수
         'limit' : False              # 기간 별 제한
     }
-    t1717 = {
+    t1532 = {                        # 종목별 테마
         'trancnt' : 1,               # 초당 전송 수
         'limit' : True               # 기간 별 제한
     }
-    t1927 = {
+    t1533 = {                        # 특이 테마
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : False              # 기간 별 제한
+    }
+    t1537 = {                        # 테마종목별 시세조회
         'trancnt' : 1,               # 초당 전송 수
         'limit' : True               # 기간 별 제한
     }
-    t0425 ={
+    t1717 = {                        # 외인기관별종목별동향
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t1921 = {                        # 신용거래동향
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t1927 = {                        # 공매도일별추이
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t3320 = {                        # FNG 요약
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t3341 = {                        # 재무순위종합
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t4201 = {                        # 주식차트(종합)
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t8407 = {                        # 주식멀티현재가조회
         'trancnt' : 1,               # 초당 전송 수
         'limit' : False              # 기간 별 제한
     }
@@ -733,13 +816,21 @@ class TrAttr :
         'trancnt' : 1,               # 초당 전송 수
         'limit' : True               # 기간 별 제한
     }
-    t4201 = {
+    t8424 = {                        # 업종전체조회
         'trancnt' : 1,               # 초당 전송 수
         'limit' : True               # 기간 별 제한
     }
-    t3341 = {
+    t8425 = {                        # 테마전체조회
         'trancnt' : 1,               # 초당 전송 수
         'limit' : True               # 기간 별 제한
+    }
+    t8428 = {                        # 증시주변자금조회
+        'trancnt' : 1,               # 초당 전송 수
+        'limit' : True               # 기간 별 제한
+    }
+    t8436 = {
+        'trancnt' : 2,               # 초당 전송 수
+        'limit' : False              # 기간 별 제한
     }
     CSPAQ12200 = {
         'trancnt' : 0.2,             # 초당 전송 수
@@ -1019,6 +1110,7 @@ class Field:
             "ty_text"            : "ETF/ETN투자유의"
         }
     }
+    
     t1305 = {
         "t1305OutBlock1":{
             "date":"날짜",
@@ -1051,7 +1143,44 @@ class Field:
             "marketcap":"시가총액"
         }
     }
-
+    t1531 = {
+        "t1531OutBlock":{
+            "tmname":"테마명",      
+            "avgdiff":"평균등락율",        
+            "tmcode":"테마코드"
+        }
+    }
+    t1533 = {
+        "t1533OutBlock1":{
+            "tmname":"테마명",      
+            "totcnt":"전체",        
+            "upcnt":"상승",         
+            "dncnt":"하락",         
+            "uprate":"상승비율",    
+            "diff_vol":"거래증가율",
+            "avgdiff":"평균등락율", 
+            "chgdiff":"대비등락율", 
+            "tmcode":"테마코드"
+        }
+    }
+    t1537 = {
+        "t1537OutBlock1":{
+            "hname":"종목명",
+            "price":"현재가",
+            "sign":"전일대비구분",
+            "change":"전일대비",
+            "diff":"등락율",
+            "volume":"누적거래량",
+            "jniltime":"전일동시간",
+            "shcode":"종목코드",
+            "yeprice":"예상체결가",
+            "open":"시가",
+            "high":"고가",
+            "low":"저가",
+            "value":"누적거래대금(백만)",
+            "marketcap":"시가총액(백만)"
+        }
+    }
     t1921 = {
         "t1921OutBlock1":{
             "mmdate":"날짜",

@@ -9,12 +9,12 @@ ebest.login()
   
 def collect_code_list():
     result = ebest.get_code_list("ALL")
-    mongodb.delete_items({}, "stock", "code_info")
-    mongodb.insert_items(result, "stock", "code_info")
+    mongodb.delete_items({}, "stock", "m_code_info")
+    mongodb.insert_items(result, "stock", "m_code_info")
     
 
 def collect_stock_info():
-    code_list = mongodb.find_items({}, "stock", "code_info")
+    code_list = mongodb.find_items({}, "stock", "m_code_info")
     target_code = set([item["단축코드"] for item in code_list])
     today = datetime.today().strftime("%Y%m%d")
     collect_list = mongodb.find_items({"날짜":today}, "stock", "price_info").distinct("code")

@@ -130,7 +130,7 @@ class UserList(Resource):
     def delete(self):
         try:
             print("delete 실행")
-            result = mongodb.update_item({"단축코드":code}, "stock", "code_info")
+            result = mongodb.update_item({"단축코드":code}, "stock", "m_code_info")
              
         except Exception as e:
             return {'error': str(e)}            

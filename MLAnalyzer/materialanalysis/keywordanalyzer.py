@@ -73,7 +73,7 @@ class KeywordAnalyzer(object):
         wordScores = {'최대':5, '양호':2, '증가': 2, '급증':4, '돌파':2, '확대':2, '개선':2, '달성': 2,
                    '최소':-5, '저조':-2, '감소': -2, '급락':-4, '돌파':-2, '축소':-2, '미달': -2, }
         score = 0
-        self.code_list = list(self.mongodb.find_items({"증권그룹" : "01"}, "stock", "code_info"))
+        self.code_list = list(self.mongodb.find_items({"증권그룹" : "01"}, "stock", "m_code_info"))
         # 출현 빈도가 높은 max_count 개의 명사만을 추출합니다.
         for n, c in count.most_common(30):
             wordcounts[n] = c

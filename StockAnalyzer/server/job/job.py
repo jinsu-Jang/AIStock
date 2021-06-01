@@ -45,8 +45,8 @@ class Job(Resource):
                     print("result_cod 건수", len(result_cod)) 
                     
                     mongodb = MongoDBHandler()
-                    mongodb.delete_items({}, "stock", "code_info")
-                    mongodb.insert_items(result_cod, "stock", "code_info")
+                    mongodb.delete_items({}, "stock", "m_code_info")
+                    mongodb.insert_items(result_cod, "stock", "m_code_info")
                 # collect_code_list()
                 # collect_stock_info()
                 return {"errcode" : 0, "errmsg": str(len(result_cod))+" 건이 정상처리 되었습니다."}
@@ -54,7 +54,7 @@ class Job(Resource):
             elif id == 2 :     
                 ebest = EBest("DEMO")
                 ebest.login()                
-                code_list = mongodb.find_items({}, "stock", "code_info")
+                code_list = mongodb.find_items({}, "stock", "m_code_info")
                 target_code = set([item["단축코드"] for item in code_list])
                 today = datetime.today().strftime("%Y%m%d")
                 collect_list = mongodb.find_items({"날짜":today}, "stock", "price_info").distinct("code")
@@ -74,7 +74,7 @@ class Job(Resource):
                 ebest = EBest("DEMO")
                 mongodb = MongoDBHandler()
                 ebest.login()
-                code_list = mongodb.find_items({}, "stock", "code_info")
+                code_list = mongodb.find_items({}, "stock", "m_code_info")
                 target_code = set([item["단축코드"] for item in code_list])
                 today = datetime.today().strftime("%Y%m%d")
                 print(today)
@@ -108,7 +108,7 @@ class Job(Resource):
                 ebest = EBest("DEMO")
                 ebest.login()    
                 mongodb = MongoDBHandler()               
-                code_list = list(mongodb.find_items({}, "stock", "code_info"))
+                code_list = list(mongodb.find_items({}, "stock", "m_code_info"))
                 print(len(code_list))
 
                 target_code = set([item["단축코드"] for item in code_list])

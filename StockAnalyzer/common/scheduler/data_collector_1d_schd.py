@@ -29,14 +29,14 @@ def collect_code_list():
     mongodb = MongoDBHandler()
     ebest.login()
     result = ebest.get_code_list("ALL")
-    mongodb.delete_items({}, "stock", "code_info")
-    mongodb.insert_items(result, "stock", "code_info")
+    mongodb.delete_items({}, "stock", "m_code_info")
+    mongodb.insert_items(result, "stock", "m_code_info")
 
 def collect_stock_info():
     ebest = EBest("DEMO")
     mongodb = MongoDBHandler()
     ebest.login()
-    code_list = mongodb.find_items({}, "stock", "code_info")
+    code_list = mongodb.find_items({}, "stock", "m_code_info")
     target_code = set([item["단축코드"] for item in code_list])
     today = datetime.today().strftime("%Y%m%d")
     print(today)

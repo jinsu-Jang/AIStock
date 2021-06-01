@@ -72,7 +72,7 @@ mongodb = MongoDBHandler()
 class Code(Resource):
     @marshal_with(code_fields)
     def get(self, code):
-        result = mongodb.find_item({"단축코드":code}, "stock", "code_info")
+        result = mongodb.find_item({"단축코드":code}, "stock", "m_code_info")
         if result is None:
             return {}, 404
         code_info = {}
@@ -85,9 +85,9 @@ class CodeList(Resource):
     def get(self):
         market = request.args.get('market', default="0", type=str)
         if market == "0":
-            results = list(mongodb.find_items({}, "stock", "code_info"))
+            results = list(mongodb.find_items({}, "stock", "m_code_info"))
         elif market == "1" or market == "2":
-            results = list(mongodb.find_items({"시장구분":market}, "stock", "code_info"))
+            results = list(mongodb.find_items({"시장구분":market}, "stock", "m_code_info"))
         result_list = []
         for item in results:
             code_info = {}

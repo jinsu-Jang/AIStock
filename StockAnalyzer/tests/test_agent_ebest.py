@@ -5,6 +5,7 @@ workon stocklab, pyenv
  python -m unittest tests.test_agent_ebest  
 """
 
+from re import A
 import unittest
 from unittest import result
 from common.agent.ebest import EBest
@@ -13,6 +14,7 @@ import time
 from common.db_handler.mongodb_handler import MongoDBHandler
 from server.job.job import Job
 from datetime import datetime, timedelta
+import pandas as pd
 
 class TestEbest(unittest.TestCase):
     def setUp(self):
@@ -27,19 +29,39 @@ class TestEbest(unittest.TestCase):
     #     print("start")
     #     result = self.ebest.get_code_list("ALL")
     #     print(result)
-    #     self.mongodb.delete_items({}, "stock", "stock_code")
-    #     self.mongodb.insert_items(result, "stock", "stock_code")
+    #     self.mongodb.delete_items({}, "stock", "m_stock_code")
+    #     self.mongodb.insert_items(result, "stock", "m_stock_code")
 
     def test_get_current_price_by_code(self):
-
-        code_list = list(self.mongodb.find_items({"bu12gubun" : "01"}, "stock1", "stock_code"))
         start = datetime.now()
-        totCount = len(code_list)
-        for i, item in enumerate( code_list ):
-            result = self.ebest.get_current_price_by_code(item['shcode'])
-            print("처리중[%d] / [%d]" %(i, totCount))
-            if i > 100 : break
+        code_list = list(self.mongodb.find_items({"bu12gubun" : "01"}, "stock1", "m_stock_code"))
+        result_ext_all = list(self.mongodb.find_items({}, "stock1", "m_code_info"))
+        start = datetime.now()
+        # totCount = len(code_list)
+        # for i, item in enumerate( code_list ):
+        #     result = self.ebest.get_current_price_by_code(item['shcode'])
+        #     print("처리중[%d] / [%d]" %(i, totCount))
+        #     if i > 100 : break
+        print(len(code_list))
+        # print(code_list)
+        df_code = pd.DataFrame.from_dict(code_list, orient='columns')
+        df_exp  = df_code #pd.DataFrame.from_dict(result_ext_all, orient='columns')
+        # df_exp.columns = df_exp.columns.str.capitalize()
+        print(df_code.columns)
+        print(df_exp.columns)
+        df_exp.drop(['hname'], axis=1, inplace=True)
+        # df_exp.drop(df_code.columns, axis=1, inplace=True)
+        # df_all  = pd.merge(df_code, df_exp, how='outer',on='shcode')
+        print(df_exp.head())
+        codelist = df_code.to_json(default_handler=str, orient = 'records')
 
+        print(len(df_code))
+        print(len(codelist))
+
+        # for code in codelist :
+        #     pass
+
+        # print(codelist)
  
         print("프로그램 종료시간", datetime.now()-start)
 
@@ -89,13 +111,13 @@ class TestEbest(unittest.TestCase):
         # print(result)
         
 
-    #     self.mongodb.delete_items({}, "stock", "code_info")
-    #     self.mongodb.insert_items(result, "stock", "code_info")    
+    #     self.mongodb.delete_items({}, "stock", "m_code_info")
+    #     self.mongodb.insert_items(result, "stock", "m_code_info")    
 
     # def test_get_stock_chart_by_code(self):
     #     print("start get_stock_chart_by_code")
 
-    #     code_list = list(self.mongodb.find_items({}, "stock", "code_info"))
+    #     code_list = list(self.mongodb.find_items({}, "stock", "m_code_info"))
         
     #     target_code = set([item["단축코드"] for item in code_list])
     #     # print(target_code)

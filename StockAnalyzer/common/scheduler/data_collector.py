@@ -1,12 +1,16 @@
 from datetime import datetime, timedelta
+from os import replace
 from re import S
 import re
 import time
+
+from numpy import NaN, isnan
 from common.agent.ebest import EBest
 from common.agent.logger import Logger
 from common.db_handler.mongodb_handler import MongoDBHandler
 from common.lib.workdate import WorkDate
 # import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 
@@ -244,10 +248,13 @@ class DataCollector(object):
         # 코드정보와 주식현재가 추가, 일별 주가정보(daily_price) 업데이트
         for icnt, code in enumerate(code_info) :
             # 거래량 만주 이하인 종목은 분석하지 않음.
+            if code['avg_volume'] is NaN : continue
+            if code['avg_volume'] is np.NaN : continue
             avg_volume = int(code['avg_volume'])
             if avg_volume < 10000 : continue
 
             # 1. 거래량 증가 종목 검색
+
             if int(code['avg_volume']) > 0:
                 inc_rate = int(code['volume']) / int(code['avg_volume'])
             else: inc_rate = 0
@@ -661,15 +668,17 @@ class DataCollector(object):
         tm_price_list = []
 
         # 테마 마스터와 특이테마 merge
-        for tm in tm_list :
+        for i, tm in enumerate(tm_list) :
             for tm_momt in tm_momt_list:
                 if tm['tmcode'] == tm_momt['tmcode'] :
                     tm.update(tm_momt)
                     tm.update({"insdate": self.ins_date, "instime" : self.ins_time})
-
-                    tm_result = self.ebest.get_price_by_theme(tm['tmcode'])
-                    tm_price_list.append(tm_result)
-
+                    if i < 70:
+                        tm_result = self.ebest.get_price_by_theme(tm['tmcode'])
+                        for tm_re in tm_result:
+                            tm_re.update({"tmcode": tm['tmcode'], "tmname": tm['tmname'],"insdate": self.ins_date, "instime" : self.ins_time})
+                            
+                        tm_price_list.extend(tm_result)
 
 
 
@@ -677,10 +686,41 @@ class DataCollector(object):
         # print(tm_list)
 
         df = pd.DataFrame.from_dict(tm_list, orient='columns')
+        df_price_list = pd.DataFrame.from_dict(tm_price_list, orient='columns')
         df['rank_avgdiff'] = df['avgdiff'].rank(method='min', ascending=False)
         df['rank_uprate'] = df['uprate'].rank(method='min', ascending=False)
         df['rank_diff_vol'] = df['diff_vol'].rank(method='min', ascending=False)
         df['rank_sum'] = df['rank_avgdiff'] + df['rank_diff_vol'] + df['rank_uprate']
+
+        df_rank = df.sort_values(by='rank_sum').head(40)
+        print("df_rank", df_rank)
+        print("\ndf_price_list", df_price_list)
+
+        # tm_code = df_rank['tmcode']
+        # print("df_rank", tm_code)
+
+        # df_ddd = df_price_list[tm_code]
+        # print("\ndf_rank", df_ddd)
+
+        df_merge  = pd.merge(df_rank, df_price_list, how='inner',on='tmcode')
+        df_merge = df_merge.astype({'marketcap': 'float'})
+        # 중복 컬럼 삭제
+        df_merge.drop(['tmname_y'], axis=1, inplace=True)
+        df_merge.drop(['insdate_y'], axis=1, inplace=True)
+        df_merge.drop(['instime_y'], axis=1, inplace=True)
+        df_merge.rename(columns={'tmname_x':'tmname', 'insdate_x':'insdate', 'instime_x':'instime'}, inplace=True)
+
+
+        # df_rank.join(df_price_list, how='inner')
+        if not df_merge.empty : 
+            df_merge['rank_by_code'] = df_merge.groupby('tmcode')['marketcap'].rank(method='min', ascending=False)
+            df_tm_rank = df_merge[df_merge['rank_by_code'] < 10]
+
+            tm_rank_list = df_tm_rank.to_dict(orient = 'records')
+
+            self.mongodb.delete_items({'insdate':self.ins_date}, self.db_name, "a4_theme_momentum")
+            self.mongodb.insert_items(tm_rank_list, self.db_name, "a4_theme_momentum")
+            self.log.info("a4_theme_momentum 등록.[%d]"% (len(tm_rank_list)))
 
         tm_list.clear()
         tm_list = df.to_dict(orient = 'records')
@@ -691,17 +731,79 @@ class DataCollector(object):
             self.log.info("m_theme_code 등록.[%d]"% (len(tm_list)))
 
         if tm_price_list:
-            for tm_price in tm_price_list:
-                tm_price.update({"insdate": self.ins_date, "instime" : self.ins_time})
-
             self.mongodb.delete_items({'insdate':self.ins_date}, self.db_name, "theme_price")
             self.mongodb.insert_items(tm_price_list, self.db_name, "theme_price")
             self.log.info("theme_price 등록.[%d]"% (len(tm_price_list)))    
 
-        
+
         
      
         # print(df_head)
+        pass
+
+    def counting_event(self, h1, h2, h3, h4) :
+        count = 0
+        if not h1 is NaN : count += 1
+        if not h2 is NaN : count += 1
+        if not h3 is NaN : count += 1
+        if not h4 is NaN : count += 1
+
+        return count
+
+
+    def run_technical_analysis(self):
+        # self.tradingday = '20210609'
+        print(self.tradingday)
+        a1_list = list(self.mongodb.find_items({'insdate':self.ins_date, 'signal':'UP'}, self.db_name, "a1_bollband"))
+        a2_list = list(self.mongodb.find_items({'insdate':self.ins_date}, self.db_name, "a2_momentum"))
+        a3_list = list(self.mongodb.find_items({'insdate':self.ins_date}, self.db_name, "a3_inc_volume"))
+        a4_list = list(self.mongodb.find_items({'insdate':self.ins_date}, self.db_name, "a4_theme_momentum"))
+
+
+        df_a1 = pd.DataFrame.from_dict(a1_list, orient='columns')
+        df_a2 = pd.DataFrame.from_dict(a2_list, orient='columns')
+        df_a3 = pd.DataFrame.from_dict(a3_list, orient='columns')
+        df_a4 = pd.DataFrame.from_dict(a4_list, orient='columns')
+    
+        print("a1_list", a1_list)
+        print("df_a1", df_a1)
+
+        df_a1 = df_a1[['shcode', 'hname']]
+        df_a2 = df_a2[['shcode', 'hname']]
+        df_a3 = df_a3[['shcode', 'hname', 'volume']]
+        df_a4 = df_a4[['shcode', 'hname', 'tmcode', 'tmname']]
+
+        df_a2.rename(columns={'hname':'hname_a2'}, inplace=True)
+        df_a3.rename(columns={'hname':'hname_a3'}, inplace=True)
+        df_a4.rename(columns={'hname':'hname_a4'}, inplace=True)
+
+        df_merge  = pd.merge(df_a1, df_a2, how='outer',left_on='shcode', right_on='shcode')
+        df_merge  = pd.merge(df_merge, df_a3, how='outer',left_on='shcode', right_on='shcode')
+        df_merge  = pd.merge(df_merge, df_a4, how='outer',left_on='shcode', right_on='shcode')
+
+        # df_a1.drop(['search_date'], axis=1, inplace=True)
+        # df_a1.drop(['insdate'], axis=1, inplace=True)
+        # df_a1.drop(['instime'], axis=1, inplace=True)
+
+        # df_a2.drop(['hname'], axis=1, inplace=True)
+        # df_a2.drop(['insdate'], axis=1, inplace=True)
+        # df_a2.drop(['instime'], axis=1, inplace=True)    
+
+        # df_a3.drop(['hname'], axis=1, inplace=True)
+        # df_a3.drop(['insdate'], axis=1, inplace=True)
+        # df_a3.drop(['instime'], axis=1, inplace=True)     
+
+        # df_a4.drop(['hname'], axis=1, inplace=True)
+        # df_a4.drop(['insdate'], axis=1, inplace=True)
+        # df_a4.drop(['instime'], axis=1, inplace=True)                  
+
+        # df_merge  = pd.merge(df_a1, df_a2, df_a3, df_a4, how='outer',on='shcode')
+        df_merge['event_cnt'] = df_merge.apply(lambda x: self.counting_event(x['hname'],x['hname_a2'],x['hname_a3'],x['hname_a4']), axis = 1)
+        df_merge.sort_values(by=['event_cnt'], axis=0, ascending=False, inplace=True)
+
+
+        print('df_merge', df_merge.head(30))
+
         pass
 
 if __name__ == '__main__':
@@ -715,8 +817,10 @@ if __name__ == '__main__':
     # dc.insert_daily_price_from_ebest(2, '20210101', '000020')
     # dc.insert_daily_price_from_ebest(2, '20210512', '')   # 매일실행(속도 문제)
 
-    # dc.collect_theme_info()
     dc.collect_daily_stock_data_from_ebest(False)
+    dc.collect_theme_info()
+    dc.run_technical_analysis()
+
     # dc.get_processing_date()
 
     # dc.search_bollingerBand_by_code('20210517', 1)   # 날짜는 3일 전으로 셋업
@@ -730,4 +834,4 @@ if __name__ == '__main__':
     # 5. 일일 뉴스 집계
     # 6. 핵심 단어 추출
 
-    dc.log.info("프로그램 종료시간 [%s] 수행시간[%s]"% (datetime.now(), datetime.now()- program_start))
+    dc.log.info("프로그램 종료시간 [%s] 수행시간[%s]"% (datetime.now(), datetime.now() - program_start))
